@@ -1,4 +1,6 @@
 EMACS ?= emacs
+USER_EMACS_DIRECTORY ?= ~/.emacs.d
+MAKE_SYMBOLIC_LINK ?= ln -s
 
 # The order is important for compilation.
 for_compile := straight-compat.el straight.el \
@@ -53,9 +55,12 @@ clean:
 	@rm -f *.elc
 
 # Make sure to test with a package that supports Emacs 24.4 here.
+.PHONY: travis
 travis: compile checkdoc longlines
-	mkdir -p ~/.emacs.d/straight/repos/
-	ln -s $(PWD) ~/.emacs.d/straight/repos/
-	$(EMACS) --batch -l ~/.emacs.d/straight/repos/straight.el/bootstrap.el \
-		--eval "(straight-use-package 'use-package)" \
-		--eval "(use-package clojure-mode :straight t)"
+	mkdir -p "$(USER_EMACS_DIRECTORY)/straight/repos/"
+	$(MAKE_SYMBOLIC_LINK) ${CURDIR} \
+	      "$(USER_EMACS_DIRECTORY)/straight/repos/straight.el"
+	$(EMACS) --batch \
+              -l "$(USER_EMACS_DIRECTORY)/straight/repos/straight.el/bootstrap.el" \
+	      --eval "(straight-use-package 'use-package)" \
+	      --eval "(use-package clojure-mode :straight t)"

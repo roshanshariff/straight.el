@@ -1,0 +1,16 @@
+install:
+  - ps: iex (new-object net.webclient).downloadstring("https://get.scoop.sh")
+  # We need coreutils since otherwise 'ln' will be available but
+  # somehow nonfunctional.
+  - ps: scoop install coreutils
+  - ps: scoop install make
+  - ps: scoop bucket add extras
+  - ps: scoop install emacs
+build_script:
+  - ps: $Env:USER_EMACS_DIRECTORY = "$Env:APPDATA/.emacs.d"
+  - ps: $Env:MAKE_SYMBOLIC_LINK = "cp -R"
+  - ps: make travis
+# longlines-start
+on_finish:
+  - ps: $blockRdp = $true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
+# longlines-stop
