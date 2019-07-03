@@ -860,7 +860,7 @@ The return value of this function is undefined."
                               :sentinel #'straight--process-sentinel)))
                   (unwind-protect
                       (while (process-live-p proc)
-                        (accept-process-output proc))
+                        (accept-process-output proc 0.1 nil 0))
                     (ignore-errors
                       (interrupt-process proc))))
               (file-missing
