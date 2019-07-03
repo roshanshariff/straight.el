@@ -757,11 +757,48 @@ eaten by a grue.")
 
 (defun straight--process-filter (proc string)
   "Process filter for processes spawned by straight.el.
-Outputs to the process buffer. See
+Outputs to the process buffer, but directs username and
+passphrase prompts to the minibuffer, like Magit. See
 <https://www.gnu.org/software/emacs/manual/html_node/elisp/Filter-Functions.html>."
-  (when-let ((buf (process-buffer proc)))
-    (with-current-buffer buf
-      (insert string))))
+  (cl-block nil
+    (condition-case e
+        (when-let ((buf (process-buffer proc)))
+          (with-current-buffer buf
+            (save-excursion
+              (goto-char (point-max))
+              (let ((case-fold-search t)
+                    (inhibit-read-only t)
+                    (prompt nil))
+                (let ((parts (split-string string "\r")))
+                  (insert (car parts))
+                  (dolist (part (cdr parts))
+                    (let ((num-chars (string-match "\n" part)))
+                      (if (null num-chars)
+                          (insert part)
+                        (save-excursion
+                          (move-to-column 0)
+                          (delete-region (point) (+ (point) num-chars))
+                          (insert (substring part 0 num-chars)))
+                        (insert (substring part num-chars))))))
+                (let ((prompt (thing-at-point 'line)))
+                  (when (string-match "username.*: $" prompt)
+                    (let ((username (read-string (thing-at-point 'line))))
+                      (insert username)
+                      (ignore-errors
+                        (process-send-string proc (concat username "\n")))
+                      (cl-return))))
+                (let ((prompt (thing-at-point 'line)))
+                  (when (string-match "\\(password\\|passphrase\\).*: $" prompt)
+                    (let ((password (read-passwd prompt)))
+                      (insert (make-string
+                               (length password) (or read-hide-char ?*)))
+                      (ignore-errors
+                        (process-send-string proc (concat password "\n")))
+                      (cl-return))))))))
+      (quit
+       (ignore-errors
+         (set-process-filter proc nil)
+         (interrupt-process proc))))))
 
 (defun straight--process-sentinel (proc event)
   "Process sentinel for processes spawned by straight.el.
@@ -771,12 +808,17 @@ but otherwise keeps quiet. Also updates
 `straight--process-output-end'. See
 <https://www.gnu.org/software/emacs/manual/html_node/elisp/Sentinels.html>."
   (unless (process-live-p proc)
-    (setq straight--process-return-code (process-exit-status proc))
     (when-let ((buf (process-buffer proc)))
       (with-current-buffer buf
-        (setq straight--process-output-end (point-marker))
-        (straight--ensure-blank-lines 2)
-        (insert "[" (straight--capitalize (string-trim event)) "]\n")))))
+        (save-excursion
+          (goto-char (point-max))
+          (let ((inhibit-read-only t))
+            (setq straight--process-output-end (point-marker))
+            (straight--ensure-blank-lines 2)
+            (insert "[" (straight--capitalize (string-trim event)) "]\n")))))
+    ;; Do this at the end so we can wait for it to be set in
+    ;; `straight--process-run'.
+    (setq straight--process-return-code (process-exit-status proc))))
 
 (defun straight--process-run (program &rest args)
   "Run executable PROGRAM with given ARGS.
