@@ -1509,10 +1509,66 @@ one specified in `straight-vc-git-default-protocol'."
 (defcustom straight-vc-git-auto-fast-forward t
   "Whether to quietly fast-forward when pulling packages.
 This suppresses popups for trivial remote changes (i.e. the
-current HEAD is an ancestor to the remote HEAD).
-Also re-attaches detached heads quietly when non-nil.
-A nil value allows for inspection of all remote changes."
+current HEAD is an ancestor to the remote HEAD). It also
+re-attaches detached heads quietly when non-nil. A nil value
+allows for inspection of all remote changes."
   :type 'boolean)
+
+;;;;;; Hosts
+
+(defun straight-vc-git-host--encode-url (repo host)
+  "Generate the Git URL for REPO on given HOST.
+REPO is a string identifying the repository name like
+\"raxod502/straight.el\", and HOST is a symbol like `github'. If
+HOST is nil, then REPO is just returned as is."
+  (if host
+      (let ((func-name
+             (intern (format "straight-vc-git-host-%S-encode-url" host))))
+        (unless (fboundp func-name)
+          (error "To use a `:host' of `%S', you must define `%S'"
+                 host func-name))
+        (funcall func-name repo))
+    repo))
+
+(defun straight-vc-git-host-encode-generic-url (repo domain)
+  "Generate the Git URL for REPO on given DOMAIN.
+This is a helper function for use in
+`straight-vc-git-host-NAME-encode-url' functions.
+
+REPO is a string identifying the repository name like
+\"raxod502/straight.el\", and DOMAIN is a string like
+\"github.com\"."
+  (pcase straight-vc-git-default-protocol
+    (pcase straight-vc-git-default-protocol
+      (`https
+       (format "https://%s/%s.git" domain repo))
+      (`ssh
+       (format "git@%s:%s.git" domain repo))
+      (_ (error "Unknown protocol: %S" protocol)))))
+
+;;;;;;; GitHub
+
+(defun straight-vc-git-host-github-encode-url (repo)
+  "Generate the Git URL for REPO on GitHub.
+REPO is a string identifying the repository name like
+\"raxod502/straight.el\"."
+  (straight-vc-git-host-encode-generic-url repo "github.com"))
+
+;;;;;;; GitLab
+
+(defun straight-vc-git-host-gitlab-encode-url (repo)
+  "Generate the Git URL for REPO on GitLab.
+REPO is a string identifying the repository name like
+\"raxod502/straight.el\"."
+  (straight-vc-git-host-encode-generic-url repo "gitlab.com"))
+
+;;;;;;; Bitbucket
+
+(defun straight-vc-git-host-bitbucket-encode-url (repo)
+  "Generate the Git URL for REPO on Bitbucket.
+REPO is a string identifying the repository name like
+\"raxod502/straight.el\"."
+  (straight-vc-git-host-encode-generic-url repo "bitbucket.org"))
 
 ;;;;;; Utility functions
 
