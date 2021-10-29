@@ -5522,15 +5522,120 @@ FILTER is a function accepting one argument: a straight style recipe plist.
 If it returns nil, the package is not considered a selection candidate."
   (completing-read
    (concat message ": ")
-   (let ((packages nil))
-     (maphash (lambda (package recipe)
-                (when (or (null filter)
-                          (funcall filter (plist-put recipe :package package)))
-                  (push package packages)))
-              straight--recipe-cache)
-     (nreverse packages))
+   (straight--package-completion straight--recipe-cache filter)
    (lambda (_) t)
    'require-match))
+
+;;;;;; Completion functions
+
+(defun straight--package-completion (recipes &optional filter)
+  "Return a  package name completion function.
+RECIPES must be a hash table mapping package name strings to recipes.
+
+See documentation of `straight--select-package' for a description
+of FILTER."
+  (let* ((annotfn (straight--package-annotation recipes))
+         (metadata `(metadata (category . straight-recipe)
+                              (annotation-function . ,annotfn))))
+    (lambda (string pred action)
+      (if (eq action 'metadata)
+          metadata
+        (complete-with-action
+         action recipes string
+         (lambda (package recipe)
+           (and (or (null filter) (funcall filter (plist-put recipe :package package)))
+                (or (null pred) (funcall pred package)))))))))
+
+(defun straight--recipe-completion (sources &optional filter cause)
+  "Return a completion function for recipes in SOURCES.
+The completion candidates are the same as those returned by
+`straight-recipes-list', which see for a description of SOURCE
+and CAUSE.  See `straight-get-recipe' for a description of FILTER."
+  (let* ((recipes (make-hash-table :test #'equal))
+         (annotfn (straight--recipe-annotation recipes))
+         (metadata `(metadata (category . straight-recipe)
+                              (annotation-function . ,annotfn))))
+    (dolist (source sources)
+      (let ((cause (concat cause (when cause straight-arrow)
+                           (format "Listing %S recipes" source))))
+        (dolist (recipe (straight-recipes 'list source cause))
+          (when (and (not (gethash recipe recipes))
+                     (or (null filter)
+                         (funcall filter recipe)))
+            (puthash recipe source recipes)))))
+    (lambda (string pred action)
+      (if (eq action 'metadata)
+          metadata
+        (complete-with-action action recipes string
+                              (when pred
+                                (lambda (recipe _)
+                                  (funcall pred recipe))))))))
+
+;;;;;; Annotation functions
+
+(defun straight--package-annotation (recipes)
+  "Return an annotation function for RECIPES keys.
+See documentation of `straight--package-completion' for a
+description of RECIPES.
+
+Each package is annotated with its installation status (installed
+or built-in) and its remote repository."
+  (let ((annotfmt
+         (propertize
+          (concat (propertize " " 'display '(space :align-to 40)) " %s"
+                  (propertize " " 'display '(space :align-to 51)) " %s")
+          'face 'completions-annotations)))
+    (lambda (package)
+      (let* ((recipe (gethash package recipes))
+             (remote (straight--recipe-annotation-remote recipe)))
+        (straight--with-plist recipe (type)
+          (format annotfmt
+                  (cond
+                   ((eq type 'built-in) "built-in")
+                   ((straight--installed-p recipe) "installed")
+                   (t ""))
+                  (or remote "")))))))
+
+(defun straight--recipe-annotation (recipes)
+  "Make an annotation function for keys of RECIPES.
+RECIPES is a hash table mapping package name strings to their
+respective sources, which are elements of
+`straight-recipe-repositories'.
+
+Each package is annotated with its source and, if available, its
+remote repository.  The remote repository is shown only if the
+package's recipe from the correct source has previously been
+retrieved by `straight-recipes-retrieve', which caches it in
+`straight--recipe-lookup-cache'."
+  (let ((annotfmt
+         (propertize
+          (concat (propertize " " 'display '(space :align-to 40)) " %s"
+                  (propertize " " 'display '(space :align-to 60)) " %s")
+          'face 'completions-annotations)))
+    (lambda (package)
+      (let* ((source (gethash package recipes))
+             (table (gethash source straight--recipe-lookup-cache))
+             (recipe (and table (gethash package table)))
+             (remote (and recipe (straight--recipe-annotation-remote
+                                  (straight--convert-recipe recipe)))))
+        (format annotfmt source (or remote ""))))))
+
+(defun straight--recipe-annotation-remote (recipe)
+  "The remote repository of RECIPE in human-readable form.
+Suitable for annotating the recipe with its origin in completion functions.
+
+Returns a string, or nil if the remote repository could not be
+determined."
+  (ignore-errors
+    (straight--with-plist recipe (type)
+      (when (eq type 'git)
+        (straight-vc-git--destructure recipe (repo host)
+          (replace-regexp-in-string     ; Remove extraneous URL components...
+           (rx bos (? (*? anything) ":" (? "//")) ; prefix "protocol://"
+               (group (*? anything))              ; keep this part
+               (? ".git") eos)                   ; suffix ".git"
+           "\\1"
+           (straight-vc-git--encode-url repo host 'https)))))))
 
 ;;;;; Bookkeeping
 
@@ -5725,10 +5830,7 @@ If it returns nil the candidate is excluded."
     (let* ((package (intern
                      (completing-read
                       "Which recipe? "
-                      (if filter
-                          (cl-remove-if-not filter
-                                            (straight-recipes-list sources))
-                        (straight-recipes-list sources))
+                      (straight--recipe-completion sources filter)
                       (lambda (_) t)
                       'require-match)))
            ;; No need to provide a `cause' to
